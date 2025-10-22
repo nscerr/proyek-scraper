@@ -54,5 +54,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-print("Semua file telah dibuat: main.py dan 5 file di dalam folder scrapers/")
