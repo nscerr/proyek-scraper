@@ -44,9 +44,9 @@ def scrape(url_postingan):
         list_url_video.append("URL Video Tidak Ditemukan")
 
     return {
-        "situs": "xgore",
-        "judul": judul_artikel,
-        "tanggal_terbit": tanggal_terbit,
+        "source_site": "xgore",
+        "title": judul_artikel,
+        "publish_date": tanggal_terbit,
         "video_urls": list_url_video,
-        "isi_artikel": isi_artikel
+        "article_body": isi_artikel
     }
