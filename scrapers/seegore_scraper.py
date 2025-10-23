@@ -54,10 +54,10 @@ def scrape(url_postingan):
 
     # Kembalikan data sebagai dictionary
     return {
-        "situs": "seegore",
-        "judul": judul_artikel,
-        "tanggal_terbit": tanggal_terbit,
+        "source_site": "seegore",
+        "title": judul_artikel,
+        "publish_date": tanggal_terbit,
         "views": jumlah_views,
         "video_urls": list_url_video,
-        "isi_artikel": isi_artikel
+        "article_body": isi_artikel
     }
