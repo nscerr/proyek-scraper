@@ -36,8 +36,8 @@ def scrape(url_postingan):
     
     # Kembalikan data sebagai dictionary
     return {
-        "situs": "kaotic",
-        "judul": judul_artikel,
-        "info_upload": info_upload,
-        "video_urls": [url_video] # Jadikan list agar konsisten
+        "source_site": "kaotic",
+        "title": judul_artikel,
+        "upload_info": info_upload,
+        "video_urls": [url_video] 
     }
