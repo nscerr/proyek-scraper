@@ -1,14 +1,13 @@
-# main.py (VERSI BARU)
+# main.py (VERSI BARU DENGAN FFMPEG FIX)
 
 import sys
 import argparse
 import json
 import os
+import subprocess # <- IMPOR BARU
+import shutil     # <- IMPOR BARU
 from urllib.parse import urlparse
 
-# ----------------------------------------------------
-# Impor baru untuk alur kerja lengkap
-# ----------------------------------------------------
 import downloader
 import uploader
 from scrapers.kaotic_scraper import scrape as scrape_kaotic
@@ -16,32 +15,38 @@ from scrapers.seegore_scraper import scrape as scrape_seegore
 from scrapers.gorecenter_scraper import scrape as scrape_gorecenter
 from scrapers.xgore_scraper import scrape as scrape_xgore
 from scrapers.bestgore_scraper import scrape as scrape_bestgore
-# ----------------------------------------------------
 
-# Tentukan folder temp di Colab (di luar folder git)
 TEMP_FOLDER = "/content/temp_video_downloads"
-
 
 def main():
     parser = argparse.ArgumentParser(description="Alur Kerja Scraper & Uploader Video Multi-Situs.")
     parser.add_argument("-u", "--url", required=True, help="URL postingan yang ingin diproses.")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Mode hening, sembunyikan log proses dan hanya tampilkan JSON akhir.")
     args = parser.parse_args()
     
     url_postingan = args.url
+    is_quiet = args.quiet
     
+    # Cek apakah ffmpeg ada
+    if shutil.which("ffmpeg") is None:
+        print(json.dumps({"error": "FATAL: ffmpeg tidak ditemukan. Proses dibatalkan."}, indent=2))
+        sys.exit(1)
+        
     try:
         domain = urlparse(url_postingan).netloc
-        # Buat URL referer dasar (misal: https://xgore.net/)
         referer_url = f"{urlparse(url_postingan).scheme}://{domain}/"
     except Exception as e:
         print(json.dumps({"error": f"URL tidak valid: {e}"}, indent=2))
         sys.exit(1)
 
     # ----------------------------------------------------
-    # LANGKAH 1: SCRAPE (Mendapatkan Data)
+    # LANGKAH 1: SCRAPE
     # ----------------------------------------------------
-    print(f"Memulai LANGKAH 1: SCRAPE data dari {domain}...")
+    if not is_quiet:
+        print(f"Memulai LANGKAH 1: SCRAPE data dari {domain}...")
+        
     data = {}
+    # (Logika if/elif untuk memilih scraper... tetap sama)
     if 'kaotic.com' in domain:
         data = scrape_kaotic(url_postingan)
     elif 'seegore.com' in domain:
@@ -55,72 +60,110 @@ def main():
     else:
         data = {"error": f"Tidak ada scraper yang dikonfigurasi untuk domain: {domain}"}
 
-    # Periksa apakah scraper gagal
     if data.get("error"):
         print(json.dumps(data, indent=2))
         sys.exit(1)
 
     video_urls_sumber = data.get("video_urls", [])
     if not video_urls_sumber or "Tidak Ditemukan" in video_urls_sumber[0]:
-        print(json.dumps({"error": "Scraper berhasil, tapi tidak ada URL video yang ditemukan.", "data": data}, indent=2))
+        data["error"] = "Scraper berhasil, tapi tidak ada URL video yang ditemukan."
+        print(json.dumps(data, indent=2))
         sys.exit(1)
         
-    print(f"Scrape SUKSES. Ditemukan {len(video_urls_sumber)} video.")
+    if not is_quiet:
+        print(f"Scrape SUKSES. Ditemukan {len(video_urls_sumber)} video.")
 
     # ----------------------------------------------------
-    # LANGKAH 2 & 3: DOWNLOAD -> UPLOAD (Looping)
+    # LANGKAH 2, 3, 4: DOWNLOAD -> FIX -> UPLOAD -> CLEANUP
     # ----------------------------------------------------
-    cdn_links_final = []
+    processed_video_urls = [] 
     
     for i, video_url in enumerate(video_urls_sumber, 1):
-        print(f"\n--- Memproses Video {i} dari {len(video_urls_sumber)}: {video_url} ---")
+        if not is_quiet:
+            print(f"\n--- Memproses Video {i} dari {len(video_urls_sumber)}: {video_url} ---")
         
-        # Tentukan referer (hanya untuk xgore.net)
         referer_untuk_download = None
-        if data.get("situs") == "xgore":
+        if data.get("source_site") == "xgore":
             referer_untuk_download = referer_url
 
         # LANGKAH 2: DOWNLOAD
-        local_file_path = downloader.download_video(video_url, TEMP_FOLDER, referer=referer_untuk_download)
+        local_file_path = downloader.download_video(video_url, TEMP_FOLDER, referer=referer_untuk_download, quiet=is_quiet)
         
         if local_file_path:
+            
+            # --- LANGKAH 2.5: FFMPEG FIX (BARU!) ---
+            upload_file_path = local_file_path # Default, gunakan file asli
+            fixed_file_path = None # Path untuk file yg di-fix
+            
+            # Cek jika ini dari bestgore, maka kita FIX
+            if data.get("source_site") == "bestgore":
+                if not is_quiet:
+                    print(f"  -> Sumber 'bestgore', menjalankan FFMPEG remux (fast-start)...")
+                
+                # Buat nama file baru (misal: abcde_fixed.mp4)
+                path_tanpa_ekstensi, ekstensi = os.path.splitext(local_file_path)
+                fixed_file_path = f"{path_tanpa_ekstensi}_fixed{ekstensi}"
+                
+                # Perintah FFMPEG
+                ffmpeg_cmd = [
+                    "ffmpeg",
+                    "-i", local_file_path,
+                    "-c", "copy",
+                    "-movflags", "+faststart",
+                    fixed_file_path,
+                    "-loglevel", "error" # Sembunyikan log ffmpeg
+                ]
+                
+                try:
+                    subprocess.run(ffmpeg_cmd, check=True)
+                    # SUKSES! Gunakan file yang sudah di-fix untuk di-upload
+                    upload_file_path = fixed_file_path 
+                    if not is_quiet:
+                        print(f"  -> Remux SUKSES. File baru: {fixed_file_path}")
+                except subprocess.CalledProcessError as e:
+                    if not is_quiet:
+                        print(f"  -> PERINGATAN: FFMPEG remux GAGAL. Tetap meng-upload file asli.")
+                    # Jika remux gagal, kita tetap coba upload file aslinya
+                    upload_file_path = local_file_path
+            
+            # --- AKHIR DARI FFMPEG FIX ---
+            
             # LANGKAH 3: UPLOAD
-            cdn_url = uploader.upload(local_file_path)
+            cdn_url = uploader.upload(upload_file_path, quiet=is_quiet)
             
             if cdn_url:
-                cdn_links_final.append(cdn_url)
+                processed_video_urls.append(cdn_url)
             else:
-                cdn_links_final.append(f"UPLOAD GAGAL untuk: {video_url}")
+                processed_video_urls.append(video_url) 
             
-            # LANGKAH 4: CLEAN UP (Hapus file temp)
+            # LANGKAH 4: CLEAN UP
             try:
-                os.remove(local_file_path)
-                print(f"  File temp '{local_file_path}' berhasil dihapus.")
+                os.remove(local_file_path) # Hapus file download asli
+                if fixed_file_path and os.path.exists(fixed_file_path):
+                    os.remove(fixed_file_path) # Hapus juga file yg di-fix
+                
+                if not is_quiet:
+                    print(f"  File temp berhasil dihapus.")
             except OSError as e:
-                print(f"  PERINGATAN: Gagal menghapus file temp '{local_file_path}'. Error: {e}")
+                if not is_quiet:
+                    print(f"  PERINGATAN: Gagal menghapus file temp. Error: {e}")
         
         else:
-            cdn_links_final.append(f"DOWNLOAD GAGAL untuk: {video_url}")
+            processed_video_urls.append(video_url)
             
     # ----------------------------------------------------
     # LANGKAH 5: TAMPILKAN HASIL AKHIR
     # ----------------------------------------------------
     
-    # Kumpulkan semua data untuk output JSON akhir
-    hasil_akhir = {
-        "situs_asal": data.get("situs", "Tidak diketahui"),
-        "judul_asal": data.get("judul", "Tidak diketahui"),
-        "url_sumber_postingan": url_postingan,
-        "jumlah_video_diproses": len(video_urls_sumber),
-        "url_cdn_hasil": cdn_links_final,
-        "data_scraper_lengkap": data # Selipkan semua data asli
-    }
+    data['video_urls'] = processed_video_urls
+    data['source_post_url'] = url_postingan
+
+    if not is_quiet:
+        print("\n" + "="*40)
+        print("      PROSES SELESAI      ")
+        print("="*40)
     
-    print("\n" + "="*40)
-    print("      PROSES SELESAI      ")
-    print("="*40)
-    # Cetak JSON akhir yang rapi
-    print(json.dumps(hasil_akhir, indent=2))
+    print(json.dumps(data, indent=2))
 
 if __name__ == "__main__":
     main()
