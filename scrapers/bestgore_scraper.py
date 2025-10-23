@@ -74,13 +74,13 @@ def scrape(url_postingan):
                 url_video = file_url
 
     return {
-        "situs": "bestgore",
-        "judul": judul_artikel,
+        "source_site": "bestgore",
+        "title": judul_artikel,
         "views": total_views,
-        "deskripsi": isi_artikel,
-        "tanggal_dibuat": tanggal_created,
-        "tanggal_diperbarui": tanggal_updated,
-        "tanggal_diterbitkan": tanggal_published,
-        "video_urls": [url_video], # Jadikan list agar konsisten
-        "resolusi_video": f"{resolusi_terbaik}p"
+        "description": isi_artikel,
+        "created_at": tanggal_created,
+        "updated_at": tanggal_updated,
+        "published_at": tanggal_published,
+        "video_urls": [url_video],
+        "video_resolution": f"{resolusi_terbaik}p"
     }
